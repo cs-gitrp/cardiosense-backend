@@ -1,0 +1,5 @@
+,Accuracy (17-feat),Precision (17-feat),Recall (17-feat),F1 Score (17-feat),Accuracy (11-feat),Precision (11-feat),Recall (11-feat),F1 Score (11-feat),Δ Accuracy,Δ F1 Score,Validated (F1 drop < 2%)
+Logistic Regression,0.8043,0.83,0.8137,0.8218,0.8261,0.8302,0.8627,0.8462,0.0218,0.0244,True
+Random Forest,0.837,0.8462,0.8627,0.8544,0.8478,0.8364,0.902,0.8679,0.0108,0.0135,True
+SVM,0.712,0.7094,0.8137,0.758,0.7011,0.6942,0.8235,0.7534,-0.0109,-0.0046,True
+XGBoost,0.8315,0.8318,0.8725,0.8517,0.8315,0.8381,0.8627,0.8502,0.0,-0.0015,True

@@ -1,0 +1,7 @@
+Metric,Value
+Total ECGs,5000
+Time Samples,1000
+ECG Leads,12
+Unique Patients,4807
+Healthy,2119
+Disease,2881

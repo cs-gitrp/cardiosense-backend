@@ -1,0 +1,20 @@
+{
+  "notebook": "13_multiclass_severity_model",
+  "winner_model": "Random Forest",
+  "features_used": [
+    "cp",
+    "exang",
+    "ca",
+    "sex",
+    "chol_missing",
+    "slope_missing",
+    "thal",
+    "thalach",
+    "age",
+    "oldpeak",
+    "fbs"
+  ],
+  "smote_nc_applied_to": "training set only",
+  "gated_integration_function": "predict_severity_gated()",
+  "supersedes": "Notebook 12 heuristic severity placeholder"
+}

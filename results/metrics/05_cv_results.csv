@@ -1,0 +1,5 @@
+,Mean Accuracy,Std Dev
+Logistic Regression,0.8167,0.0395
+Random Forest,0.7922,0.0394
+XGBoost,0.7827,0.039
+SVM,0.682,0.0516

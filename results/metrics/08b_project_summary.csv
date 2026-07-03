@@ -1,0 +1,10 @@
+Component,Value
+Dataset,PTB-XL
+Architecture,CNN Baseline
+Signals,21430
+Patients,18637
+Accuracy,0.874
+Precision,0.9109
+Recall,0.8654
+F1,0.8875
+AUC,0.9431

@@ -1,0 +1,3 @@
+Diagnostic,Value,Interpretation
+Agreement-Preserving Rate,100.0%,"When both branches agree, fusion preserves that agreed decision"
+Boundary-Uncertainty Rate (under disagreement),28.7%,"When branches strongly disagree, fusion lands near the decision boundary (appropriately uncertain) rather than confidently picking a side"

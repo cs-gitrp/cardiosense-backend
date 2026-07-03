@@ -1,0 +1,8 @@
+Metric,Clinical RF,ECG CNN
+Accuracy,0.837,0.8728
+Precision,0.8273,0.9001
+Recall,0.8922,0.8757
+F1 Score,0.8585,0.8877
+AUC,0.9262,0.9423
+Average Precision,0.9422,0.9626
+Brier,0.113,0.0943

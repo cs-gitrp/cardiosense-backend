@@ -1,0 +1,10 @@
+,Random Forest,XGBoost
+Accuracy,0.4603,0.4048
+Macro Precision,0.3352,0.2883
+Macro Recall,0.3323,0.2883
+Macro F1,0.3292,0.2881
+Balanced Accuracy,0.3323,0.2883
+Cohen Kappa,0.2625,0.2021
+Matthews Corr (MCC),0.2649,0.2022
+ROC-AUC (OvR),0.7276,0.6798
+Log Loss,1.2865,1.4825

@@ -1,0 +1,24 @@
+{
+    "project": "CardioSense AI",
+    "model": "CNN Baseline",
+    "dataset": "PTB-XL",
+    "dataset_version": "1.0.1",
+    "sampling_frequency": 100,
+    "input_shape": [
+        1000,
+        12
+    ],
+    "signals": 21430,
+    "unique_patients": 18637,
+    "train_samples": 14969,
+    "validation_samples": 3254,
+    "test_samples": 3207,
+    "batch_size": 64,
+    "epochs_requested": 50,
+    "epochs_completed": 19,
+    "best_epoch": 11,
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "loss": "Binary Crossentropy",
+    "random_seed": 42
+}

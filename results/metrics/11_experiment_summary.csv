@@ -1,0 +1,11 @@
+Property,Value
+Clinical Model,Random Forest
+ECG Model,1D CNN
+Clinical AUC,0.9262
+ECG AUC,0.9423
+Clinical Brier,0.113
+ECG Brier,0.0943
+Clinical AP,0.9422
+ECG AP,0.9626
+Random Seed,42
+Bootstrap Samples,1000
