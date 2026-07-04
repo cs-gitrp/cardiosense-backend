@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 10080  # 7 days
     MODEL_DIR: str = "./ml_artifacts"
     ENVIRONMENT: str = "development"
+    GROQ_API_KEY: str | None = None
     BACKEND_CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "https://cardiosense.vercel.app",

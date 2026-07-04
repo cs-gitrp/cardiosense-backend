@@ -1,16 +1,18 @@
 from contextlib import asynccontextmanager
 
-# pyrefly: ignore [missing-import]
 from fastapi import FastAPI, Depends
-# pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, assessment, insights
+from app.api import auth, assessment, insights, chat
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.db.session import Base, engine
 from app.models import User  # noqa: F401 — ensures all models registered before create_all
+from app.core.config import settings
 
+print("="*60)
+print("GROQ =", settings.GROQ_API_KEY)
+print("="*60)
 
 # ---------------------------------------------------------------------------
 # Startup: create tables + warm up ML models
@@ -51,7 +53,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=["http://localhost:3000", "https://cardiosense.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -73,10 +75,10 @@ app.include_router(
 
 # Insights — /insights/calibration, /model-comparison, /bootstrap-ci
 app.include_router(insights.router)
+app.include_router(chat.router)
 
 
 # Fix /auth/me to use the real dependency (avoids circular import in auth.py)
-# pyrefly: ignore [missing-import]
 from fastapi import APIRouter
 me_router = APIRouter()
 
