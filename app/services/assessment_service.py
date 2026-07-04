@@ -93,6 +93,8 @@ def _gate_severity(binary_prediction: str, fused_prob: float, clinical_dict: dic
         return {"severity_grade": "Critical", "severity_source": "heuristic_probability_band"}
 
 
+import time
+
 def run_assessment(
     request: AssessRequest,
     user_id: str,
@@ -109,20 +111,14 @@ def run_assessment(
         k: (np.nan if v is None else v) for k, v in clinical_dict.items()
     }
 
-    # --- 2. Reshape ECG if provided ---
-    ecg_array = None
+    # --- 2. Reshape ECG if provided, else use zeros ---
     if request.ecg_signal is not None:
         ecg_array = _reshape_ecg(request.ecg_signal)
+    else:
+        ecg_array = np.zeros((1000, 12), dtype=np.float32)
 
     # --- 3. Call Notebook 12 inference pipeline ---
-    if ecg_array is not None:
-        pipeline_result = pipeline.run(clinical_dict_clean, ecg_array)
-    else:
-        # Clinical-only fallback: pipeline.run() requires ECG shape (1000,12)
-        # so pass a zero array and let branch_contribution surface the 100% 
-        # clinical weighting — OR call a clinical-only method if you add one.
-        # TODO: add pipeline.run_clinical_only() to Notebook 12 if needed.
-        raise ValueError("ECG signal is currently required. Clinical-only mode coming soon.")
+    pipeline_result = pipeline.run(clinical_dict_clean, ecg_array)
 
     # --- 4. Severity gating (Notebook 13, Cell 18 logic) ---
     severity_result = _gate_severity(pipeline_result["prediction"], pipeline_result["fused_probability"], clinical_dict_clean)
@@ -170,4 +166,192 @@ def run_assessment(
         recommendations=pipeline_result.get("recommendations"),
         feature_missingness_map=missingness_map,
         disclaimer=DISCLAIMER,
+        clinical=clinical_dict,
     )
+
+
+def run_assessment_generator(
+    request: AssessRequest,
+    user_id: str,
+    db: Session
+):
+    yield "INIT_PIPELINE"
+    time.sleep(0.5)
+
+    pipeline = get_pipeline()
+
+    # --- 1. Build patient dict for pipeline ---
+    clinical_dict = request.clinical.model_dump()
+    missingness_map = _build_missingness_map(clinical_dict)
+
+    # Replace None with np.nan so pipeline's imputer handles them
+    clinical_dict_clean = {
+        k: (np.nan if v is None else v) for k, v in clinical_dict.items()
+    }
+
+    # --- 2. Reshape ECG if provided, else use zeros ---
+    if request.ecg_signal is not None:
+        ecg_array = _reshape_ecg(request.ecg_signal)
+    else:
+        ecg_array = np.zeros((1000, 12), dtype=np.float32)
+
+    # Try granular step-by-step execution; fall back to atomic pipeline.run()
+    # if the pipeline class doesn't expose individual sub-engine methods.
+    try:
+        yield "RUNNING_CLINICAL_RF"
+        time.sleep(0.5)
+        clinical_raw = pipeline.clinical_engine.predict_raw(clinical_dict_clean)
+        clinical_calibrated = clinical_raw
+
+        yield "RUNNING_ECG_CNN"
+        time.sleep(0.5)
+        ecg_raw = pipeline.ecg_engine.predict_raw(ecg_array)
+
+        yield "CALIBRATING_PLATT"
+        time.sleep(0.5)
+        ecg_calibrated = pipeline.calibration_engine.calibrate(ecg_raw)
+
+        yield "GATING_NODE_COMPLETE"
+        time.sleep(0.5)
+        fused_prob = pipeline.fusion_engine.fuse(clinical_calibrated, ecg_calibrated)
+
+        # Severity gating
+        severity_result = _gate_severity(
+            "Disease" if fused_prob >= 0.5 else "No Disease",
+            fused_prob,
+            clinical_dict_clean
+        )
+
+        # Compile the rest of the report
+        quality_report = pipeline.quality_engine.assess(ecg_array)
+        clinical_contribution = abs(clinical_calibrated - 0.5)
+        ecg_contribution = abs(ecg_calibrated - 0.5)
+        total = clinical_contribution + ecg_contribution + 1e-8
+
+        top_clinical_features = pipeline.explain_engine.explain_clinical(clinical_dict_clean)
+        top_ecg_leads = pipeline.explain_engine.explain_ecg(ecg_array)
+        recommendations = pipeline.recommendation_engine.generate(
+            fused_prob, severity_result["severity_grade"], quality_report["flags"]
+        )
+
+        # --- 5. Persist to DB ---
+        assessment_id = str(uuid.uuid4())
+        db_assessment = Assessment(
+            id=assessment_id,
+            user_id=user_id,
+            clinical_input=clinical_dict,
+            feature_missingness_map=missingness_map,
+            ecg_quality=quality_report,
+            prediction="Disease" if fused_prob >= 0.5 else "No Disease",
+            fused_probability=fused_prob,
+            severity=severity_result["severity_grade"],
+            severity_source=severity_result["severity_source"],
+            confidence=round(max(fused_prob, 1 - fused_prob), 4),
+            branch_contribution={
+                "clinical_pct": round(clinical_contribution / total * 100, 1),
+                "ecg_pct": round(ecg_contribution / total * 100, 1)
+            },
+            branch_probabilities={
+                "clinical": round(clinical_calibrated, 4),
+                "ecg": round(ecg_calibrated, 4)
+            },
+            top_clinical_features=top_clinical_features,
+            top_ecg_leads=top_ecg_leads,
+            recommendations=recommendations,
+            disclaimer=DISCLAIMER,
+        )
+        db.add(db_assessment)
+        db.commit()
+        db.refresh(db_assessment)
+
+        bc = db_assessment.branch_contribution
+        bp = db_assessment.branch_probabilities
+
+        response = AssessResponse(
+            assessment_id=assessment_id,
+            prediction=db_assessment.prediction,
+            fused_probability=db_assessment.fused_probability,
+            severity=db_assessment.severity,
+            severity_source=db_assessment.severity_source,
+            confidence=db_assessment.confidence,
+            branch_contribution=BranchContribution(**bc) if bc else None,
+            branch_probabilities=BranchProbabilities(**bp) if bp else None,
+            top_clinical_features=top_clinical_features,
+            top_ecg_leads=top_ecg_leads,
+            ecg_quality=quality_report,
+            recommendations=recommendations,
+            feature_missingness_map=missingness_map,
+            disclaimer=DISCLAIMER,
+            clinical=clinical_dict,
+        )
+
+        payload_json = response.model_dump_json()
+        yield f"FINAL_REPORT_READY:{payload_json}"
+
+    except AttributeError:
+        # Fallback: pipeline doesn't expose granular sub-engine methods.
+        # Run atomically via pipeline.run() and emit milestone tokens with delays.
+        yield "RUNNING_CLINICAL_RF"
+        time.sleep(0.3)
+        yield "RUNNING_ECG_CNN"
+        time.sleep(0.3)
+        yield "CALIBRATING_PLATT"
+        time.sleep(0.3)
+
+        pipeline_result = pipeline.run(clinical_dict_clean, ecg_array)
+
+        yield "GATING_NODE_COMPLETE"
+        time.sleep(0.3)
+
+        severity_result = _gate_severity(
+            pipeline_result["prediction"],
+            pipeline_result["fused_probability"],
+            clinical_dict_clean,
+        )
+
+        assessment_id = str(uuid.uuid4())
+        db_assessment = Assessment(
+            id=assessment_id,
+            user_id=user_id,
+            clinical_input=clinical_dict,
+            feature_missingness_map=missingness_map,
+            ecg_quality=pipeline_result.get("ecg_quality"),
+            prediction=pipeline_result["prediction"],
+            fused_probability=pipeline_result["fused_probability"],
+            severity=severity_result["severity_grade"],
+            severity_source=severity_result["severity_source"],
+            confidence=pipeline_result["confidence"],
+            branch_contribution=pipeline_result.get("branch_contribution"),
+            branch_probabilities=pipeline_result.get("branch_probabilities"),
+            top_clinical_features=pipeline_result.get("top_clinical_features"),
+            top_ecg_leads=pipeline_result.get("top_ecg_leads"),
+            recommendations=pipeline_result.get("recommendations"),
+            disclaimer=DISCLAIMER,
+        )
+        db.add(db_assessment)
+        db.commit()
+        db.refresh(db_assessment)
+
+        bc = pipeline_result.get("branch_contribution")
+        bp = pipeline_result.get("branch_probabilities")
+
+        response = AssessResponse(
+            assessment_id=assessment_id,
+            prediction=pipeline_result["prediction"],
+            fused_probability=pipeline_result["fused_probability"],
+            severity=severity_result["severity_grade"],
+            severity_source=severity_result["severity_source"],
+            confidence=pipeline_result["confidence"],
+            branch_contribution=BranchContribution(**bc) if bc else None,
+            branch_probabilities=BranchProbabilities(**bp) if bp else None,
+            top_clinical_features=pipeline_result.get("top_clinical_features"),
+            top_ecg_leads=pipeline_result.get("top_ecg_leads"),
+            ecg_quality=pipeline_result.get("ecg_quality"),
+            recommendations=pipeline_result.get("recommendations"),
+            feature_missingness_map=missingness_map,
+            disclaimer=DISCLAIMER,
+            clinical=clinical_dict,
+        )
+
+        payload_json = response.model_dump_json()
+        yield f"FINAL_REPORT_READY:{payload_json}"

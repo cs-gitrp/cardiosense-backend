@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 10080  # 7 days
     MODEL_DIR: str = "./ml_artifacts"
     ENVIRONMENT: str = "development"
+    BACKEND_CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "https://cardiosense.vercel.app",
+    ]
 
     class Config:
         env_file = ".env"

@@ -83,6 +83,8 @@ class AssessResponse(BaseModel):
     recommendations: Optional[list] = None
     feature_missingness_map: Optional[dict] = None   # Phase 7 audit trail
     disclaimer: str
+    clinical: Optional[ClinicalFeatures] = None       # original patient input features
+    created_at: Optional[str] = None                  # ISO timestamp of assessment
 
 
 class AssessmentHistoryItem(BaseModel):

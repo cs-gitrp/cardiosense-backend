@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI, Depends
+# pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, assessment, insights
@@ -49,7 +51,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://cardiosense.vercel.app"],
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -74,6 +76,7 @@ app.include_router(insights.router)
 
 
 # Fix /auth/me to use the real dependency (avoids circular import in auth.py)
+# pyrefly: ignore [missing-import]
 from fastapi import APIRouter
 me_router = APIRouter()
 

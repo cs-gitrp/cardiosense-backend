@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.models.assessment import Assessment
 from app.schemas.assessment import AssessRequest, AssessResponse, AssessmentHistoryItem
-from app.services.assessment_service import run_assessment
+from app.services.assessment_service import run_assessment, run_assessment_generator
 
 router = APIRouter(prefix="/assess", tags=["assessment"])
 
@@ -27,6 +28,34 @@ def create_assessment(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+
+
+@router.post("/run-stream")
+def run_assessment_stream(
+    payload: AssessRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Streaming inference endpoint.
+    Runs the multi-branch classification pipeline step-by-step and streams status tokens.
+    """
+    def event_generator():
+        try:
+            for event in run_assessment_generator(payload, str(current_user.id), db):
+                yield f"{event}\n"
+        except Exception as e:
+            yield f"ERROR:{str(e)}\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/history", response_model=list[AssessmentHistoryItem])
@@ -93,4 +122,26 @@ def get_assessment(
         recommendations=row.recommendations,
         feature_missingness_map=row.feature_missingness_map,
         disclaimer=row.disclaimer or "",
+        clinical=row.clinical_input,
+        created_at=row.created_at.isoformat() if row.created_at else None,
     )
+
+
+@router.delete("/{assessment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_assessment(
+    assessment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Deletes a past assessment.
+    """
+    row = (
+        db.query(Assessment)
+        .filter(Assessment.id == assessment_id, Assessment.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found.")
+    db.delete(row)
+    db.commit()
