@@ -10,9 +10,6 @@ from app.db.session import Base, engine
 from app.models import User  # noqa: F401 — ensures all models registered before create_all
 from app.core.config import settings
 
-print("="*60)
-print("GROQ =", settings.GROQ_API_KEY)
-print("="*60)
 
 # ---------------------------------------------------------------------------
 # Startup: create tables + warm up ML models
@@ -21,7 +18,7 @@ print("="*60)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create tables (use Alembic in production; this is safe for dev)
-    Base.metadata.create_all(bind=engine)
+    #Base.metadata.create_all(bind=engine)
 
     # Warm up model pipeline so the first /assess request isn't slow
     if settings.ENVIRONMENT != "test":

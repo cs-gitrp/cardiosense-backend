@@ -119,6 +119,7 @@ def _build_assessment_context(assessment: Assessment) -> str:
     return "\n".join(lines)
 
 
+
 @router.post("")
 async def chat(
     request: ChatRequest,
@@ -134,10 +135,8 @@ async def chat(
         os.environ.get("GROQ_API_KEY") or 
         getattr(settings, "GROQ_API_KEY", "") or 
         getattr(settings, "groq_api_key", "")
-        
     )
     
-    print(f"DEBUG — OS Env: {bool(os.environ.get('GROQ_API_KEY'))} | Pydantic: {bool(getattr(settings, 'GROQ_API_KEY', ''))}")
     if not GROQ_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
