@@ -10,6 +10,7 @@ Assessment service — the single place where:
 import numpy as np
 import pandas as pd
 import uuid
+import time
 
 from sqlalchemy.orm import Session
 
@@ -93,8 +94,6 @@ def _gate_severity(binary_prediction: str, fused_prob: float, clinical_dict: dic
         return {"severity_grade": "Critical", "severity_source": "heuristic_probability_band"}
 
 
-import time
-
 def run_assessment(
     request: AssessRequest,
     user_id: str,
@@ -119,6 +118,20 @@ def run_assessment(
 
     # --- 3. Call Notebook 12 inference pipeline ---
     pipeline_result = pipeline.run(clinical_dict_clean, ecg_array)
+
+    # Override defaults if running in pure clinical-only tabular mode
+    if request.ecg_signal is None:
+        pipeline_result["branch_contribution"] = {"clinical_pct": 100.0, "ecg_pct": 0.0}
+        current_bp = pipeline_result.get("branch_probabilities") or {}
+        pipeline_result["branch_probabilities"] = {
+            "clinical": current_bp.get("clinical", pipeline_result["fused_probability"]),
+            "ecg": None
+        }
+        pipeline_result["ecg_quality"] = {
+            "quality_score": 0,
+            "flags": ["No ECG recording provided"],
+            "is_acceptable": False
+        }
 
     # --- 4. Severity gating (Notebook 13, Cell 18 logic) ---
     severity_result = _gate_severity(pipeline_result["prediction"], pipeline_result["fused_probability"], clinical_dict_clean)
@@ -215,21 +228,39 @@ def run_assessment_generator(
         time.sleep(0.5)
         fused_prob = pipeline.fusion_engine.fuse(clinical_calibrated, ecg_calibrated)
 
-        # Severity gating
+        # Severity Gating
         severity_result = _gate_severity(
             "Disease" if fused_prob >= 0.5 else "No Disease",
             fused_prob,
             clinical_dict_clean
         )
 
-        # Compile the rest of the report
-        quality_report = pipeline.quality_engine.assess(ecg_array)
-        clinical_contribution = abs(clinical_calibrated - 0.5)
-        ecg_contribution = abs(ecg_calibrated - 0.5)
-        total = clinical_contribution + ecg_contribution + 1e-8
+        # Compile and intercept properties for clinical-only evaluation mode
+        if request.ecg_signal is None:
+            quality_report = {
+                "quality_score": 0,
+                "flags": ["No ECG recording provided"],
+                "is_acceptable": False
+            }
+            branch_contrib = {"clinical_pct": 100.0, "ecg_pct": 0.0}
+            branch_probs = {"clinical": round(clinical_calibrated, 4), "ecg": None}
+            top_ecg_leads = []
+        else:
+            quality_report = pipeline.quality_engine.assess(ecg_array)
+            clinical_contribution = abs(clinical_calibrated - 0.5)
+            ecg_contribution = abs(ecg_calibrated - 0.5)
+            total = clinical_contribution + ecg_contribution + 1e-8
+            branch_contrib = {
+                "clinical_pct": round(clinical_contribution / total * 100, 1),
+                "ecg_pct": round(ecg_contribution / total * 100, 1)
+            }
+            branch_probs = {
+                "clinical": round(clinical_calibrated, 4),
+                "ecg": round(ecg_calibrated, 4)
+            }
+            top_ecg_leads = pipeline.explain_engine.explain_ecg(ecg_array)
 
         top_clinical_features = pipeline.explain_engine.explain_clinical(clinical_dict_clean)
-        top_ecg_leads = pipeline.explain_engine.explain_ecg(ecg_array)
         recommendations = pipeline.recommendation_engine.generate(
             fused_prob, severity_result["severity_grade"], quality_report["flags"]
         )
@@ -247,14 +278,8 @@ def run_assessment_generator(
             severity=severity_result["severity_grade"],
             severity_source=severity_result["severity_source"],
             confidence=round(max(fused_prob, 1 - fused_prob), 4),
-            branch_contribution={
-                "clinical_pct": round(clinical_contribution / total * 100, 1),
-                "ecg_pct": round(ecg_contribution / total * 100, 1)
-            },
-            branch_probabilities={
-                "clinical": round(clinical_calibrated, 4),
-                "ecg": round(ecg_calibrated, 4)
-            },
+            branch_contribution=branch_contrib,
+            branch_probabilities=branch_probs,
             top_clinical_features=top_clinical_features,
             top_ecg_leads=top_ecg_leads,
             recommendations=recommendations,
@@ -299,6 +324,20 @@ def run_assessment_generator(
         time.sleep(0.3)
 
         pipeline_result = pipeline.run(clinical_dict_clean, ecg_array)
+
+        # Override defaults within atomic fallback context if running clinical-only mode
+        if request.ecg_signal is None:
+            pipeline_result["branch_contribution"] = {"clinical_pct": 100.0, "ecg_pct": 0.0}
+            current_bp = pipeline_result.get("branch_probabilities") or {}
+            pipeline_result["branch_probabilities"] = {
+                "clinical": current_bp.get("clinical", pipeline_result["fused_probability"]),
+                "ecg": None
+            }
+            pipeline_result["ecg_quality"] = {
+                "quality_score": 0,
+                "flags": ["No ECG recording provided"],
+                "is_acceptable": False
+            }
 
         yield "GATING_NODE_COMPLETE"
         time.sleep(0.3)
