@@ -54,9 +54,6 @@ Thumbs.db
 # RESEARCH (generated / reproducible artifacts)
 # ==========================================================
 
-# Original datasets (documented in README)
-research/data/*
-!research/data/README.md
 
 # Large generated ECG arrays
 research/results/processed_ecg/
