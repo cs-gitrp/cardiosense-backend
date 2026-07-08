@@ -1,35 +1,77 @@
-# Environment and secrets
+
+
+# ----------------------------------------------------------
+# Environment & Secrets
+# ----------------------------------------------------------
 .env
 .env.*
 !.env.example
 
+# ----------------------------------------------------------
 # Python
+# ----------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
 .coverage
 htmlcov/
 
-# Virtual environments
+# ----------------------------------------------------------
+# Virtual Environments
+# ----------------------------------------------------------
 env/
 venv/
 .venv/
 
+# ----------------------------------------------------------
 # Jupyter
+# ----------------------------------------------------------
 .ipynb_checkpoints/
 
-# Local databases and generated runtime files
+# ----------------------------------------------------------
+# Local databases & runtime files
+# ----------------------------------------------------------
 *.db
 *.sqlite
 *.sqlite3
 *.log
 
-# OS and editor files
+# ----------------------------------------------------------
+# OS / IDE
+# ----------------------------------------------------------
 .DS_Store
 Thumbs.db
+
 .idea/
 .vscode/
 
+# ==========================================================
+# RESEARCH (generated / reproducible artifacts)
+# ==========================================================
+
+# Original datasets (documented in README)
+research/data/*
+!research/data/README.md
+
+# Large generated ECG arrays
+research/results/processed_ecg/
+
+# Generated numpy arrays (Integrated Gradients, etc.)
+research/results/arrays/
+
+# Temporary prediction outputs
+research/results/predictions/
+
+# ==========================================================
+# Build / Packaging
+# ==========================================================
+
+build/
+dist/
+*.egg-info/
+.Python

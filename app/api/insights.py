@@ -153,3 +153,35 @@ def get_confusion_matrix():
         "threshold": 0.50,
         "n_test": 184,
     }
+
+
+import os
+# pyrefly: ignore [missing-import]
+from fastapi import HTTPException
+# pyrefly: ignore [missing-import]
+from fastapi.responses import FileResponse
+
+@router.get("/notebook/{num}")
+def download_research_notebook(num: str):
+    """
+    Dynamically locates and streams original Jupyter Notebook files (.ipynb)
+    from the research directory by matching their prefix numbers (e.g., '05', '09', '11').
+    """
+    # Navigate from app/api/ to the project root and locate the research folder
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    notebooks_dir = os.path.join(base_dir, "research", "notebooks")
+    
+    if not os.path.exists(notebooks_dir):
+        raise HTTPException(status_code=404, detail="Research notebooks archive directory not found.")
+    
+    # Scan files to find the matching prefix number
+    for filename in os.listdir(notebooks_dir):
+        if filename.startswith(num) and filename.endswith(".ipynb"):
+            file_path = os.path.join(notebooks_dir, filename)
+            return FileResponse(
+                path=file_path,
+                media_type="application/x-ipynb+json",
+                filename=filename
+            )
+            
+    raise HTTPException(status_code=404, detail=f"Notebook file prefix code {num} could not be located.")

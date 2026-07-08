@@ -1,0 +1,6 @@
+file,patient_id,label,shape
+healthy_01,18700.0,Healthy,"(1000, 12)"
+healthy_02,2236.0,Healthy,"(1000, 12)"
+disease_01,8908.0,Disease,"(1000, 12)"
+disease_02,9227.0,Disease,"(1000, 12)"
+disease_03,11961.0,Disease,"(1000, 12)"
