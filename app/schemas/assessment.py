@@ -85,7 +85,10 @@ class AssessResponse(BaseModel):
     disclaimer: str
     clinical: Optional[ClinicalFeatures] = None       # original patient input features
     created_at: Optional[str] = None                  # ISO timestamp of assessment
-
+    doctor_summary: str | None = None
+    patient_summary: str | None = None
+    lead_annotation: str | None = None
+    display_waveforms: dict[str, str] | None = None
 
 class AssessmentHistoryItem(BaseModel):
     assessment_id: str

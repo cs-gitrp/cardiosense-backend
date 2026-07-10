@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.models.assessment import Assessment
-from app.schemas.assessment import AssessRequest, AssessResponse, AssessmentHistoryItem
-from app.services.assessment_service import run_assessment, run_assessment_generator
+from app.schemas.assessment import AssessRequest, AssessResponse, AssessmentHistoryItem, BranchContribution, BranchProbabilities
+from app.services.assessment_service import run_assessment, run_assessment_generator, _compile_prompt_summaries
 
 router = APIRouter(prefix="/assess", tags=["assessment"])
 
@@ -17,11 +17,6 @@ def create_assessment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Main inference endpoint.
-    Accepts 11 clinical features + pre-processed ECG signal (flat 12000 floats).
-    Returns the full pipeline.run() output plus severity gating and audit fields.
-    """
     try:
         return run_assessment(payload, str(current_user.id), db)
     except ValueError as e:
@@ -36,10 +31,6 @@ def run_assessment_stream(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Streaming inference endpoint.
-    Runs the multi-branch classification pipeline step-by-step and streams status tokens.
-    """
     def event_generator():
         try:
             for event in run_assessment_generator(payload, str(current_user.id), db):
@@ -65,10 +56,6 @@ def get_assessment_history(
     limit: int = 20,
     offset: int = 0,
 ):
-    """
-    Returns the current user's assessment history, sorted newest first.
-    Used for the Risk Trend graph in the History page (process.md Section 7).
-    """
     rows = (
         db.query(Assessment)
         .filter(Assessment.user_id == current_user.id)
@@ -95,10 +82,6 @@ def get_assessment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Retrieves a single past assessment by ID.
-    Used when the user revisits a previous result page.
-    """
     row = (
         db.query(Assessment)
         .filter(Assessment.id == assessment_id, Assessment.user_id == current_user.id)
@@ -106,6 +89,19 @@ def get_assessment(
     )
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found.")
+
+    # Generate the missing text fields on the fly during data extraction
+    enriched = _compile_prompt_summaries(
+        row.fused_probability,
+        row.prediction,
+        row.severity,
+        row.severity_source,
+        row.clinical_input or {},
+        row.top_ecg_leads
+    )
+
+    bc = row.branch_contribution
+    bp = row.branch_probabilities
 
     return AssessResponse(
         assessment_id=str(row.id),
@@ -114,34 +110,15 @@ def get_assessment(
         severity=row.severity,
         severity_source=row.severity_source,
         confidence=row.confidence,
-        branch_contribution=row.branch_contribution,
-        branch_probabilities=row.branch_probabilities,
+        branch_contribution=BranchContribution(**bc) if bc else None,
+        branch_probabilities=BranchProbabilities(**bp) if bp else None,
         top_clinical_features=row.top_clinical_features,
         top_ecg_leads=row.top_ecg_leads,
         ecg_quality=row.ecg_quality,
         recommendations=row.recommendations,
         feature_missingness_map=row.feature_missingness_map,
         disclaimer=row.disclaimer or "",
-        clinical=row.clinical_input,
+        clinical=row.clinical_input or {},
         created_at=row.created_at.isoformat() if row.created_at else None,
+        **enriched
     )
-
-
-@router.delete("/{assessment_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_assessment(
-    assessment_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Deletes a past assessment.
-    """
-    row = (
-        db.query(Assessment)
-        .filter(Assessment.id == assessment_id, Assessment.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found.")
-    db.delete(row)
-    db.commit()
