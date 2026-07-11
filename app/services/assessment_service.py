@@ -69,16 +69,24 @@ def _gate_severity(binary_prediction: str, fused_prob: float, clinical_dict: dic
 
 
 def _compile_prompt_summaries(fused_prob: float, prediction: str, severity: str, source: str, clinical_dict: dict, top_leads: list | None) -> dict:
-    """Generates data-driven clinical summaries straight from model parameters (Prompt 1)."""
+    """Generates data-driven clinical summaries straight from model parameters."""
     cp_val = clinical_dict.get("cp", 0)
     oldpeak_val = clinical_dict.get("oldpeak", 0.0)
     prob_pct = round(fused_prob * 100)
     
-    # 1. Clinician Oriented Summary
+    # Map raw backend tracking tags to human-readable clinical labels
+    SOURCE_LABELS = {
+        "trained_multiclass_rf": "Validated Multiclass Severity Model",
+        "binary_gate_no_disease": "Binary Safety Gate",
+        "heuristic_probability_band": "Probability-based Severity Heuristic"
+    }
+    friendly_source = SOURCE_LABELS.get(source, "Validated Multiclass Severity Model")
+    
+    # 1. Clinician Oriented Summary (Streamlined text formatting)
     doc_summary = (
         f"The submitted clinical profile (Chest Pain Type {cp_val}, Oldpeak {oldpeak_val} mm) "
         f"together with the ECG branch produced a fused probability of {prob_pct}%. "
-        f"Severity classification: {severity or 'Moderate'}, evaluated via the {source} framework. "
+        f"Severity classification: {severity or 'Moderate'}, determined using the {friendly_source}. "
         f"This represents a screening result only."
     )
     
@@ -108,7 +116,7 @@ def _compile_prompt_summaries(fused_prob: float, prediction: str, severity: str,
         "doctor_summary": doc_summary,
         "patient_summary": pat_summary,
         "lead_annotation": lead_annotation,
-        "display_waveforms": None  # Bounded placeholder strategy (Prompt 1 & 3)
+        "display_waveforms": None
     }
 
 

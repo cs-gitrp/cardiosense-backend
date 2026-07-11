@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI, Depends
+# pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, assessment, insights, chat
@@ -76,6 +78,7 @@ app.include_router(chat.router)
 
 
 # Fix /auth/me to use the real dependency (avoids circular import in auth.py)
+# pyrefly: ignore [missing-import]
 from fastapi import APIRouter
 me_router = APIRouter()
 
