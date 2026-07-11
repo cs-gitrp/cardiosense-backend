@@ -2,7 +2,9 @@
 Alembic env.py — drop this into app/db/migrations/env.py
 """
 from logging.config import fileConfig
+# pyrefly: ignore [missing-import]
 from sqlalchemy import engine_from_config, pool
+# pyrefly: ignore [missing-import]
 from alembic import context
 import sys, os
 

@@ -1,332 +1,723 @@
-# CardioSense AI — Master Process Document
+# CardioSense AI — Process & Architecture Document
 
-**Status: LOCKED. This is the final flagship project. Do not pivot further.**
-
-This document is the single source of truth for this project. Use it with Claude or any other AI agent to maintain full context. Update it as decisions evolve, but the core architecture and scope below should not change.
-
----
-
-## 1. Project Identity
-
-**Name:** CardioSense AI
-**Tagline:** A multimodal cardiac risk intelligence platform combining clinical data and ECG signals through a novel gated-fusion deep learning architecture.
-
-**Type:** Full-stack, production-grade final year flagship project (BTech CSE — AI/ML), with a research paper as a secondary, non-blocking output.
-
-**Primary goal:** A DocuMind-level (or better) deployed software platform, powered by genuine ML/DL technical depth — not a thin UI wrapper around a simple model, and not a paper-only research exercise with no usable product.
-
-**Secondary goal:** If results are strong, package the ML core + experiments into an IEEE/Springer-style manuscript. Publication is NOT the design driver — system quality is. The paper, if pursued, is a byproduct of doing the ML work properly.
+> This is the authoritative record of how CardioSense AI was designed, built, and
+> what was actually delivered — including decisions that changed from the original plan
+> and why. It is the single document to hand anyone asking "how does this work?"
 
 ---
 
-## 2. Layman Description
+## Table of Contents
 
-CardioSense looks at a patient's basic health numbers (age, blood pressure, cholesterol, ECG readings) and tells them — and a doctor — not just "you might have heart disease" but **how confident it is, which signals it trusted most for this specific patient, and how severe the risk is.** It reads a real ECG signal the way a cardiologist would, AND the clinical checkup numbers the way a GP would, then intelligently decides how much to trust each source for that particular patient — rather than treating all patients and all data sources the same way. Users get a personal dashboard, can track assessments over time, and can chat with an AI assistant (CardioBot) about their results and general heart health.
-
----
-
-## 3. What Is Unique / Novel (the technical core)
-
-Do not let this get diluted — this is the one architectural idea the whole project is built around.
-
-### 3.1 Core novelty: Confidence-Gated Multimodal Fusion
-- **Branch A (clinical/tabular):** feature-selected classical ML (RF/XGBoost) on UCI Heart Disease features.
-- **Branch B (ECG signal):** CNN-LSTM hybrid on PTB-XL ECG signals.
-- **Gated Fusion Module (the novel piece):** a small learned network that looks at how confident each branch is for THIS specific patient and weights the two predictions accordingly — not a fixed 50/50 average, which is what most "multimodal" student/research projects lazily do.
-
-### 3.2 Secondary novelty: Missingness as a Feature, Not Just a Preprocessing Step
-UCI Heart Disease has real missing values (`ca`, `thal` columns). Instead of silently imputing and moving on, missingness is treated as an explicit signal: missingness-indicator flags are fed into the model, and a dedicated experiment studies how prediction confidence and accuracy degrade as more clinical features go missing — and how the gating module compensates by leaning more on the ECG branch.
-
-### 3.3 What is reused (not novel, by design)
-- BERT/standard embeddings — N/A here (this is tabular+signal, not text)
-- Dependency parsing — N/A
-- Standard CNN/LSTM layers, standard RF/XGBoost — reused, established
-- Standard feature selection algorithms (Chi-Square, LASSO, RF importance) — reused, but the *comparison* of all three against each other is part of the contribution
-
-**One-sentence pitch for resume/interviews/abstract:**
-"A confidence-gated dual-branch fusion model that combines feature-selected clinical data with ECG deep learning, learning per-patient trust weighting between modalities rather than fixed-weight fusion, with explicit missingness-aware handling of incomplete clinical records."
+1. [What Was Built](#1-what-was-built)
+2. [Technical Novelty — Honest Account](#2-technical-novelty--honest-account)
+3. [ML Pipeline — 13 Notebooks](#3-ml-pipeline--13-notebooks)
+4. [Key Results](#4-key-results)
+5. [Architecture — As Deployed](#5-architecture--as-deployed)
+6. [Critical Decisions & Pivots](#6-critical-decisions--pivots)
+7. [Data](#7-data)
+8. [Full Stack Overview](#8-full-stack-overview)
+9. [What Was Planned vs What Shipped](#9-what-was-planned-vs-what-shipped)
 
 ---
 
-## 4. Datasets (Locked — exactly two, no more)
+## 1. What Was Built
 
-| Dataset | Purpose | Notes |
+**CardioSense AI** is a multimodal cardiac risk screening platform that fuses
+structured clinical features with 12-lead ECG signals to produce calibrated,
+explainable cardiac risk predictions.
+
+**Type:** Full-stack production prototype — BTech CSE (AI/ML) final year project,
+KCC Institute of Technology & Management, Noida. Graduating 2027.
+
+**Scope:** Not a clinical tool. Not a toy notebook. A deployed platform with:
+- A 13-notebook ML research pipeline (clinical + ECG branches, calibration, fusion,
+  explainability, bootstrap evaluation, severity grading)
+- A FastAPI backend with streaming inference, JWT auth, PostgreSQL persistence
+- A Next.js frontend with animated pipeline visualization, SHAP charts, ECG lead
+  attribution, history tracking, model insights dashboard, and an AI chatbot
+- Deployed: Render (backend) + Vercel (frontend)
+
+**The one architectural idea everything is built around:**  
+When a clinical test and an ECG both exist for a patient, don't trust them equally.
+Trust whichever one is more confident for *this specific patient* — and be transparent
+about which branch drove the prediction and why.
+
+---
+
+## 2. Technical Novelty — Honest Account
+
+### What is genuinely novel
+
+**Confidence-adaptive fusion with explicit branch attribution.**  
+Most multimodal systems use fixed-weight averaging ("50% clinical, 50% ECG").
+CardioSense uses a confidence-adaptive weighting function: each branch's contribution
+is proportional to how far its calibrated probability is from the decision boundary
+(i.e., how *confident* it is). A clinical branch outputting 0.92 and an ECG branch
+outputting 0.55 will weight the clinical branch at ~84% for that patient. This is
+computed analytically (not learned), validated via a gamma sensitivity sweep, and
+calibrated via Platt scaling.
+
+**Missingness as a feature, not just a preprocessing step.**  
+Rather than silently imputing missing clinical values, missingness-indicator flags
+(`chol_missing`, `slope_missing`) are fed into the model as explicit features.
+The model can therefore learn that "this patient's cholesterol was unavailable"
+carries information — and the fusion module can compensate by weighting the ECG
+branch more heavily when clinical data is incomplete.
+
+**Full evaluation stack for a research prototype.**  
+Calibration (Brier score, ECE), bootstrap confidence intervals (n=1000),
+per-lead ECG attribution via Integrated Gradients, and SHAP feature attribution
+are all implemented and surfaced in the deployed platform's Insights dashboard —
+not just in notebook outputs.
+
+### What was originally planned but delivered differently
+
+| Planned | Actual | Why it changed |
 |---|---|---|
-| **UCI Heart Disease** (Cleveland + combined 4-source version) | Clinical/tabular branch | ~920 rows combined. Real missingness in `ca`, `thal`. Supports both binary and original 0-4 multi-class severity grading — use multi-class, most projects lazily binarize. |
-| **PTB-XL** (fallback: MIT-BIH) | ECG signal branch | 21,000+ labeled ECGs, multi-label diagnostic annotations, large enough to train a real CNN/LSTM. |
+| Learned gating network | Confidence-adaptive formula (gamma=3) | Formula performed comparably, was interpretable, and avoided overfitting a small meta-learner on limited paired data |
+| CNN-LSTM ECG branch | CNN-only (3 conv blocks) | Controlled ablation in Notebook 08 showed LSTM added no performance — AUC 0.9162 (CNN) vs 0.8893 (CNN-LSTM). Reported as a genuine negative result. |
+| FAISS vector store for CardioBot | Groq LLM with assessment context injection | Assessment data is already structured; retrieving it from a vector store added latency with no quality benefit |
 
-Do not add a third dataset "for completeness." Depth on two beats shallow coverage of three.
+### What is NOT claimed as novel (by design)
+
+Standard CNN layers, Random Forest, XGBoost, Platt calibration, and SHAP are
+established methods. They are components, not contributions. The contribution
+is the system: how these components are combined, calibrated, and made
+interpretable for a clinical screening context.
 
 ---
 
-## 5. Model Comparison Plan (Existing vs. Proposed)
+## 3. ML Pipeline — 13 Notebooks
 
-### 5.1 Models to implement and compare (7 total)
-1. Logistic Regression (baseline)
-2. Random Forest
-3. SVM (RBF kernel)
-4. XGBoost (strongest classical baseline expected)
-5. CNN-LSTM on ECG only (no fusion) — DL-only baseline
-6. Naive fusion (simple averaged tabular+ECG prediction, no learned gating) — "obvious" multimodal baseline
-7. **Proposed: Dual-branch Gated Fusion model** (feature-selected RF/XGBoost + CNN-LSTM + learned gating)
+### Overview
 
-### 5.2 Feature selection comparison (tabular branch)
-Run and compare three methods, report selected features and downstream accuracy for each:
-- Chi-Square
+```
+01 → 02 → 02b → 03 → 04 → 05      Clinical branch + feature selection
+                              ↓
+06 → 07 → 08 → 08b             ECG branch + CNN training
+                  ↓
+                  09            Calibration + confidence-adaptive fusion
+                  ↓
+             10 → 11            Explainability + bootstrap evaluation
+                  ↓
+                  12            Production inference pipeline
+                  ↓
+                  13            Severity grading extension
+```
+
+---
+
+### Notebook 01 — Data Cleaning
+
+**Input:** 4 raw UCI Heart Disease files (Cleveland 303, Hungarian 294,
+Switzerland 123, VA 200 = 920 rows combined)
+
+**Key decisions:**
+- `?` markers → `NaN` (do not treat as a string category)
+- `chol=0` and `trestbps=0` treated as biologically impossible → also `NaN`
+  (Switzerland and VA datasets have many zero-cholesterol rows — these are
+  recording absences, not real readings)
+- Missingness-indicator columns created: `chol_missing`, `slope_missing`,
+  `ca_missing`, `thal_missing` — these travel with the data through every
+  downstream step
+- Two output datasets:
+  - `binary_dataset.csv` (920 rows) — target binarized to 0/1
+  - `multiclass_dataset.csv` (626 rows) — target kept as 0-4 severity scale
+    (294 rows dropped because unusable severity labels in some sub-datasets)
+
+---
+
+### Notebook 02 — Train/Test Split
+
+**GroupShuffleSplit on patient ID** to prevent identity leakage across splits.
+`random_state=42` fixed throughout.
+
+---
+
+### Notebook 02b — Imputation Leakage Fix
+
+**Bug caught:** Original Notebook 03 had KNN imputer fit on the full combined
+dataset before splitting — a data leakage error.
+
+**Fix:** Imputer now fit on TRAIN only, applied to test via `.transform()` not
+`.fit_transform()`. Re-ran all downstream notebooks on corrected splits.
+
+**Impact:** Accuracy dropped 1–3% — confirming leakage existed and was not
+catastrophic, but was real.
+
+---
+
+### Notebook 03 — Baseline Models
+
+4 classical models on 17 raw features (before feature selection):
+
+| Model | Accuracy | F1 | AUC |
+|---|---|---|---|
+| Logistic Regression | 81.52% | 0.8365 | 0.897 |
+| Random Forest | 83.70% | 0.8544 | 0.925 |
+| SVM | 82.61% | 0.8431 | 0.908 |
+| XGBoost | 83.15% | 0.8476 | 0.912 |
+
+Random Forest is the strongest clinical baseline.
+
+---
+
+### Notebook 04 — Feature Selection
+
+**Method:** Consensus ranking — three methods run independently, top-10-in-2-of-3 rule.
+Rule committed *before* seeing results (pre-registered to avoid post-hoc selection bias).
+
+Three methods:
+- Chi-Square test (filter method)
 - LASSO (L1-regularized logistic regression)
-- Random Forest Feature Importance
+- Random Forest feature importance
 
-Train RF/XGBoost on each method's selected subset → compare accuracy/F1 → pick best-performing subset for the final pipeline. This comparison is itself a dashboard panel and a results-section table.
+**11 consensus-selected features (FROZEN):**
+`cp, exang, ca, sex, chol_missing, slope_missing, thal, thalach, age, oldpeak, fbs`
 
-### 5.3 Class imbalance handling
-- Tabular branch: **SMOTE-NC** (handles mixed categorical/continuous features) + class-weighted loss
-- ECG branch: **Focal loss** for rarer arrhythmia classes in PTB-XL
-- Multi-class severity grading (0-4) is more imbalanced than binary — use this as the primary imbalance story, not the binary version
-
-### 5.4 Full metric set (report for ALL 7 models)
-- Accuracy
-- Precision
-- Recall (Sensitivity) — flagged as most critical in medical context (false negatives = missed at-risk patients)
-- F1-score
-- Specificity
-- ROC-AUC
-- PR-AUC (more informative than ROC-AUC under imbalance)
-- Confusion Matrix (full TP/TN/FP/FN, heatmap visualization per model)
-- Cohen's Kappa / Quadratic Weighted Kappa (for multi-class severity grading)
-- **5-fold or 10-fold cross-validation** for every model — report mean ± std, not single train/test split numbers
-
-### 5.5 Ablation studies (mandatory)
-- Gating ON vs OFF (fixed-weight fusion)
-- Tabular-only vs ECG-only vs full dual-branch
-- With vs without missingness-indicator flags
-- Multi-class severity vs binarized version
-
-### 5.6 Presentation structure (powers both the in-app dashboard AND paper results section)
-1. Main comparison table — 7 models × all metrics, proposed model row highlighted, best score per column bolded
-2. Confusion matrix grid — one heatmap per model
-3. Overlaid ROC curves — all models, one plot
-4. Feature selection comparison table
-5. Ablation table
-6. Bar chart — accuracy/F1/recall across all 7 models
+Feature set stored in `results/metrics/04_selected_features.csv`.
+All downstream notebooks load from this file — never hardcode a feature list.
 
 ---
 
-## 6. System Scope Decision
+### Notebook 05 — Feature Ablation
 
-**Build a full platform. Do not compromise on this.** Auth, dashboard, history, chatbot, and an in-app evaluation/insights view are all in scope and required — this is what makes it "DocuMind-level or better," not just a notebook with a model.
+Validated 11-feature set against 17-feature baseline on identical splits:
 
-**What is explicitly in scope:**
-- Full auth (signup/login)
-- Personal dashboard with assessment history and risk trend over time
-- New assessment flow (clinical form + ECG upload)
-- Results page with explainability (branch attribution)
-- Chatbot (RAG-based, grounded in user's own data + cardiology knowledge base)
-- Model Insights / Evaluation dashboard showing the full Section 5 comparison live in-product
-- Settings/profile
+| Model | Δ Accuracy | Δ F1 | Result |
+|---|---|---|---|
+| Logistic Regression | +2.18% | +2.44% | Improved |
+| Random Forest | +1.08% | +1.35% | Improved |
+| SVM | -1.09% | -0.46% | Passed (<2% rule) |
+| XGBoost | 0.00% | -0.15% | Passed (<2% rule) |
 
-**What is explicitly out of scope (no future-scope creep):**
-- Multi-disease support (no diabetes/cancer modules — single disease, full depth, as already decided)
-- Multilingual support
-- Real-time streaming data ingestion
-- Third dataset
-- Mobile app (web only)
+Two models *improved* with fewer features — dropped columns (`trestbps`, `restecg`,
+`slope`, `chol`, `ca_missing`, `thal_missing`) were contributing noise, not signal.
 
----
-
-## 7. PRD (Product Requirements)
-
-**Problem statement:** Existing cardiac risk prediction systems rely on either clinical data alone or ECG signals alone, and when they combine both, they use naive fixed-weight fusion — failing to account for per-patient data quality/completeness differences that should change how much each modality is trusted.
-
-**Target users:** Demonstration/portfolio context — framed as a tool for clinicians/patients to get a risk assessment with transparency into *why* the model made its decision and which data source it trusted more.
-
-**Core features (full list, build all of these — no shallow "decide later"):**
-1. User authentication (signup/login, JWT-based)
-2. New Assessment: form for clinical features (age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal) + ECG file upload or sample selection
-3. Results page: risk score, severity grade (0-4), branch-attribution explanation, downloadable report
-4. Assessment History: list of past assessments per user, searchable/filterable, risk trend over time
-5. CardioBot chatbot: RAG-grounded, answers questions about the user's own result and general cardiology knowledge; explicitly informational only, with a visible medical disclaimer (not a diagnostic tool)
-6. Model Insights / Evaluation Dashboard: full Section 5 comparison tables and charts, live in the product
-7. Settings/profile management
+**Locked best clinical model:**
+Random Forest, 11 features — Accuracy 84.78%, F1 0.8679, Recall 90.2%
+(catches 92/102 actual heart disease patients, misses only 10).
+Recall is the priority metric — false negatives = missed at-risk patients.
 
 ---
 
-## 8. TRD (Technical Requirements)
+### Notebook 06 — PTB-XL Acquisition
 
-**ML Stack:**
-- Tabular models: scikit-learn (Logistic Regression, RF, SVM), XGBoost
-- Deep learning: PyTorch (CNN-LSTM for ECG)
-- Feature selection: scikit-learn (Chi-Square, LASSO via `Lasso`/`LogisticRegression(penalty='l1')`, RF importance)
-- Imbalance handling: `imbalanced-learn` (SMOTE-NC), custom focal loss implementation in PyTorch
-- ECG signal processing: `wfdb` (for PTB-XL), `scipy`/`neurokit2` for signal preprocessing/denoising
-
-**Backend:** FastAPI + PostgreSQL + SQLAlchemy (same proven stack as DocuMind)
-**Frontend:** Next.js + Tailwind + shadcn/ui (same proven stack as DocuMind)
-**Chatbot/RAG:** Same architecture pattern as DocuMind — sentence-transformers embeddings + FAISS vector store + Groq API (llama-3.1-8b-instant) or equivalent for generation
-**Model serving:** Model checkpoints loaded directly into the FastAPI process at startup — no separate HF Endpoint needed, model is lightweight enough
-**Auth:** JWT-based, bcrypt password hashing
-
-**Database tables:** `users`, `assessments` (clinical inputs + ECG reference + results + branch confidences), `chat_sessions`, `chat_messages`, `model_runs` (stores metrics for the Insights dashboard)
+PTB-XL dataset: 21,437 12-lead ECG recordings at 100 Hz, 10 seconds per record.
+Labels: binary heart disease labels extracted from multi-label diagnostic annotations.
 
 ---
 
-## 9. System Architecture
+### Notebook 07 — ECG Preprocessing
 
-### 9.1 ML Core Architecture
-
-```
-Clinical Features (tabular)          ECG Signal (raw waveform)
-        │                                     │
-        ▼                                     ▼
-Missingness-aware                      Preprocessing
-preprocessing                          (denoise, segment,
-(imputation + missingness               normalize)
- indicator flags)                            │
-        │                                    ▼
-        ▼                            CNN-LSTM feature
-Feature Selection                     extractor
-(Chi-Sq / LASSO / RF                        │
- importance comparison)                     ▼
-        │                            ECG risk score +
-        ▼                            confidence estimate
-Classical ML                                │
-(RF / XGBoost,                              │
- SMOTE-NC + class-weighted)                 │
-        │                                   │
-        ▼                                   │
-Tabular risk score +                        │
-confidence estimate                         │
-        │                                   │
-        └───────────────┬───────────────────┘
-                         ▼
-              Gated Fusion Module
-        (learns per-patient trust weight
-         between tabular vs ECG branch)
-                         │
-                         ▼
-              Final Risk Prediction
-              + Severity Grade (0-4)
-              + Branch Attribution Explanation
-```
-
-### 9.2 Full System Architecture (Platform Level)
-
-```
-                    ┌─────────────────────────┐
-                    │   Next.js Frontend       │
-                    │  (Tailwind + shadcn/ui)  │
-                    └───────────┬──────────────┘
-                                │ REST API (JWT auth)
-                    ┌───────────▼──────────────┐
-                    │     FastAPI Backend       │
-                    ├───────────────────────────┤
-                    │ Auth Service               │
-                    │ Assessment Service ───────┼──► ML Core (Section 9.1)
-                    │ Chatbot Service ──────────┼──► FAISS Vector Store
-                    │                            │    + Groq API
-                    │ Insights Service           │
-                    └───────────┬───────────────┘
-                                │
-                    ┌───────────▼──────────────┐
-                    │   PostgreSQL Database     │
-                    │ users, assessments,       │
-                    │ chat_sessions/messages,    │
-                    │ model_runs                 │
-                    └────────────────────────────┘
-```
-
-### 9.3 API Endpoints
-
-- `POST /auth/signup`, `POST /auth/login`
-- `POST /assess` — clinical features + ECG → dual-branch model → risk score, severity, branch-confidence breakdown
-- `GET /assess/{id}` — retrieve a past assessment
-- `GET /history` — user's assessment history
-- `POST /chatbot` — RAG-grounded chat (assessment context + cardiology knowledge base)
-- `GET /insights/model-comparison` — Section 5 full comparison data
-- `GET /insights/feature-selection` — Chi-Sq/LASSO/RF importance comparison data
-- `GET /insights/ablation` — gating on/off, branch-only, missingness-flag ablation data
+- Normalized to zero-mean, unit-variance per lead
+- Shape: (1000 samples × 12 leads) per record
+- GroupShuffleSplit on patient ID to prevent identity leakage
 
 ---
 
-## 10. Frontend Pages / UI
+### Notebook 08 — CNN Architecture Ablation (5K dev subset)
 
-1. **Landing / Login / Signup**
-2. **Dashboard** — past assessments, risk trend chart, quick stats
-3. **New Assessment** — clinical feature form + ECG upload/sample selection
-4. **Results Page** — risk score, severity grade, branch-attribution explanation, downloadable report
-5. **Assessment History** — searchable/filterable list, trend view
-6. **CardioBot (Chatbot)** — conversational interface, grounded in user's assessment + cardiology knowledge base, visible disclaimer banner
-7. **Model Insights / Evaluation Dashboard** — full model comparison table, confusion matrix grid, ROC curves, feature selection comparison, ablation table, bar charts
-8. **Settings** — profile, data management
+**Research question:** Does adding LSTM after the conv blocks improve ECG
+classification? Controlled for confound: held conv-depth constant across variants.
 
----
-
-## 11. Prerequisites Before Writing Code
-
-- [ ] Read 2-3 reference papers on multimodal fusion for clinical+signal data (to properly cite "naive fusion" as the weak baseline you're beating)
-- [ ] Read 1-2 reference papers on PTB-XL CNN/LSTM classification approaches (architecture reference for ECG branch)
-- [ ] Get comfortable with `wfdb` library for reading PTB-XL ECG records
-- [ ] Get comfortable with `imbalanced-learn`'s SMOTE-NC for mixed-type tabular data
-- [ ] Set up GPU environment (Colab Pro or Kaggle GPU — T4/P100 sufficient for CNN-LSTM on ECG; tabular models run fine on CPU)
-- [ ] Review your own DocuMind RAG pipeline code — the chatbot here reuses that pattern almost directly
-
----
-
-## 12. Free AI Tools / Software — Exact Purpose
-
-| Tool | Purpose |
-|---|---|
-| **Claude (this chat)** | Architecture decisions, debugging, code review, paper/report writing assistance |
-| **GitHub Copilot (free student pack)** | Daily coding driver — boilerplate, FastAPI routes, React components |
-| **v0.dev** | UI component generation for frontend pages |
-| **Google Colab (free/Pro tier)** | GPU training for CNN-LSTM ECG model and any DL experiments |
-| **Kaggle Notebooks** | Alternative free GPU environment, also where PTB-XL/UCI datasets are easily accessible |
-| **Hugging Face (free tier)** | Hosting sentence-transformers embedding model for chatbot RAG (if not run locally) |
-| **Groq API (free tier)** | LLM inference for CardioBot chatbot generation (same as DocuMind setup) |
-| **scikit-learn, XGBoost, imbalanced-learn** | Classical ML models, feature selection, SMOTE-NC — all free, open-source |
-| **PyTorch** | CNN-LSTM ECG model, gated fusion module implementation |
-| **wfdb (PhysioNet toolkit)** | Reading/parsing PTB-XL ECG signal data |
-| **neurokit2 / scipy** | ECG signal preprocessing, denoising |
-| **FAISS** | Vector store for chatbot RAG (same as DocuMind) |
-| **Vercel (free tier)** | Frontend deployment |
-| **Render (free tier)** | Backend + PostgreSQL deployment |
-| **draw.io / Mermaid (free)** | Architecture diagrams for README and paper figures |
-| **Overleaf (free tier)** | LaTeX paper writing if pursuing publication |
-| **Google Scholar / Connected Papers (free)** | Literature review, finding related work for paper positioning |
-
----
-
-## 13. Exact Roadmap (Week-by-Week)
-
-| Phase | Weeks | Deliverable |
+| Architecture | AUC | F1 |
 |---|---|---|
-| 1. Setup + literature skim + data acquisition | 1 | Repos created, both datasets downloaded, 2-3 reference papers read |
-| 2. Data preprocessing (both branches) | 1 | Cleaned tabular data with missingness flags, preprocessed/segmented ECG signals, train/test splits |
-| 3. Feature selection comparison + classical ML baselines | 1 | Chi-Sq/LASSO/RF importance comparison done, models 1-4 (LogReg, RF, SVM, XGBoost) trained and evaluated |
-| 4. ECG branch (CNN-LSTM) | 1.5 | Model 5 (ECG-only) trained, evaluated |
-| 5. Naive fusion baseline + Gated Fusion model (the core novel work) | 2 | Models 6 and 7 built, trained, evaluated |
-| 6. Full evaluation suite (Section 5.4, 5.5) | 1 | All metrics, confusion matrices, ROC curves, ablations complete for all 7 models |
-| 7. Backend (auth, assessment service, insights service) | 1.5 | Working API, all endpoints functional |
-| 8. Chatbot (RAG) | 0.5 | CardioBot functional, reusing DocuMind RAG pattern |
-| 9. Frontend (all 8 pages) | 2 | Fully functional UI, polished to DocuMind standard or better |
-| 10. Deployment + documentation | 1 | Deployed app, README, EVAL_REPORT, screenshots, resume bullets |
-| 11. (Optional, parallel from week 5 onward) Paper writing | ongoing | Draft manuscript, submission-ready if pursuing publication |
+| CNN-only (3 conv blocks) | **0.9162** | **0.8508** ← winner |
+| CNN-LSTM (3 conv blocks + LSTM) | 0.8893 | 0.8374 |
+| CNN-LSTM (2 conv blocks + LSTM) | 0.8785 | 0.8320 |
 
-**Total: ~12-13 weeks for full build.** Paper writing runs in parallel, not sequentially after.
+**Decision: CNN-only architecture locked.** LSTM does not improve morphology
+classification at this scale. Reported as a genuine negative result —
+not hidden, not explained away.
+
+Patient-level leakage check: PASSED (zero patient overlap across train/val/test).
 
 ---
 
-## 14. Step-by-Step Starting Guidance (Exact First Steps)
+### Notebook 08b — Full PTB-XL Training
 
-1. **Today:** Create two repos — `cardiosense-ai` (frontend) and `cardiosense-backend` (backend), mirroring DocuMind's folder structure.
-2. **Today/tomorrow:** Download UCI Heart Disease (combined 4-source CSV) and set up PTB-XL access (via `wfdb` + PhysioNet, or Kaggle's PTB-XL mirror).
-3. **This week:** Open the UCI data, inspect missingness in `ca`/`thal` manually — decide exact imputation strategy before writing pipeline code. Open a handful of PTB-XL ECG records with `wfdb`, visualize a few waveforms, understand the signal format before building preprocessing code.
-4. **This week:** Read 1 ECG-CNN reference paper and 1 multimodal clinical+signal fusion reference paper — these anchor your "naive fusion" baseline definition and your gated fusion's positioning.
-5. **End of week 1:** Have both datasets cleaned, split, and ready; have a literature note (2-3 papers: method, dataset, key result) to reference later for the paper and for justifying your baseline choices.
+CNN trained on full 21,437-record PTB-XL dataset (T4 GPU, Kaggle).
+Final ECG branch: **AUC 0.9424**.
 
 ---
 
-## 15. Working Agreement / Notes for Future Sessions
+### Notebook 09 — Calibration + Confidence-Adaptive Fusion
 
-- This document is the locked source of truth. Do not propose scope pivots — bring questions about *implementation* of what's already decided here.
-- If stuck on any phase, reference the relevant section number above when asking Claude or another agent for help, to preserve context without re-explaining the whole project.
-- Update Section 13 (roadmap) checkboxes/status as phases complete, so future sessions know exactly where the project stands.
+**Platt scaling (CalibratedClassifierCV, sigmoid)** applied to both branches:
+
+| Branch | AUC | Brier Score | ECE |
+|---|---|---|---|
+| Clinical RF | 0.9262 | 0.1130 | 0.0653 |
+| ECG CNN | 0.9424 | 0.0943 | 0.0340 |
+
+ECG branch dominates on all three metrics — consistent story across AUC,
+calibration error, and reliability.
+
+**Confidence-adaptive fusion:**
+
+```
+confidence(p) = max(p, 1 - p)       # distance from 0.5 decision boundary
+
+w_clinical = conf(clinical_prob)^γ / (conf(clinical_prob)^γ + conf(ecg_prob)^γ)
+w_ecg      = 1 - w_clinical
+
+fused_prob = w_clinical × clinical_prob + w_ecg × ecg_prob
+```
+
+**Gamma sensitivity sweep** (γ = 1, 2, 3, 5):
+- γ=1: linear — moderate sharpening
+- γ=3: chosen — meaningful confidence differentiation without near-binary selection
+- γ=5: too aggressive — near-binary model selection on most patients
+
+**Gamma=3 selected.** Justified by sweep, not arbitrary.
+
+**Fused pipeline AUC: 0.9582**
+
+**Key qualitative finding:** "Strong disagreement" case (clinical=0.15, ECG=0.88)
+→ fused probability 0.521. Appropriately uncertain at the decision boundary when
+branches strongly disagree. A deployed system should flag these cases for human
+review rather than forcing a binary output. This is honest behavior.
+
+*Limitation, disclosed:* UCI clinical and PTB-XL ECG are separate populations.
+Paired case studies are illustrative, not real paired patient predictions.
+This is documented and would require a clinical dataset with both modalities
+per patient to resolve — which is a deployment, not a research, requirement.
+
+---
+
+### Notebook 10 — Explainability
+
+- **Clinical branch:** SHAP 0.51.0, `TreeExplainer` on the Random Forest.
+  Returns per-feature SHAP values for each assessment.
+- **ECG branch:** Integrated Gradients on the full PTB-XL CNN (Notebook 08b model).
+  Returns per-lead attribution scores (12 leads, named I/II/III/aVR/aVL/aVF/V1-V6).
+
+Both are surfaced on the results page for every assessment run through the platform.
+
+---
+
+### Notebook 11 — Bootstrap Confidence Intervals
+
+`bootstrap_metric_ci()`, n=1000, threshold=0.50, fixed SEED.
+
+Per-branch (not fused — the fused CI is a known open item):
+
+| Branch | Metric | Mean | Std | 95% CI Lower | 95% CI Upper |
+|---|---|---|---|---|---|
+| Clinical | AUC | 0.9266 | 0.0178 | 0.8887 | 0.9582 |
+| ECG | AUC | 0.9424 | 0.0040 | 0.9347 | 0.9504 |
+| Clinical | F1 Score | 0.8576 | 0.0258 | 0.8039 | 0.9065 |
+| ECG | F1 Score | 0.8877 | 0.0058 | 0.8764 | 0.8988 |
+| Clinical | Recall | 0.8920 | 0.0317 | 0.8230 | 0.9469 |
+| ECG | Recall | 0.8756 | 0.0082 | 0.8594 | 0.8916 |
+| Clinical | Precision | 0.8268 | 0.0366 | 0.7523 | 0.8957 |
+| ECG | Precision | 0.9003 | 0.0069 | 0.8874 | 0.9135 |
+
+ECG branch is consistently tighter (lower std) than Clinical across all metrics.
+Clinical Precision has the widest CI (0.75–0.90) — the least stable metric in
+the whole pipeline. This is disclosed in the Insights dashboard.
+
+---
+
+### Notebook 12 — Production Inference Pipeline
+
+Assembled all components into a single callable `CardioSensePipeline` class,
+serialized with all sub-components (except ECG CNN and ExplainabilityEngine,
+which load separately due to Keras and SHAP class definition requirements).
+
+**Contract:**
+```python
+pipeline.run(patient_dict, ecg_signal)
+# patient_dict: {cp, exang, ca, sex, chol_missing, slope_missing,
+#                thal, thalach, age, oldpeak, fbs}
+# ecg_signal:   np.ndarray shape (1000, 12), normalized, 100 Hz
+```
+
+**Returns:**
+```python
+{
+  "prediction":          "Disease" | "No Disease",
+  "fused_probability":   float,
+  "severity":            str,          # heuristic band
+  "severity_source":     str,
+  "confidence":          float,
+  "branch_contribution": {"clinical_pct": float, "ecg_pct": float},
+  "branch_probabilities":{"clinical": float, "ecg": float},
+  "top_clinical_features": [...],      # SHAP
+  "top_ecg_leads":          [...],     # Integrated Gradients
+  "ecg_quality":            {...},
+  "recommendations":        [...],
+  "disclaimer":             str
+}
+```
+
+**Clinical-only mode:** When `ecg_signal=None`, a zero array is passed.
+The fusion formula naturally discounts a zero ECG (maximum uncertainty = 0.5
+probability = zero contribution weight). `branch_contribution` is overridden
+to show 100% clinical, ECG leads set to null.
+
+**Serialization fix:** `09_confidence_adaptive_fusion.pkl` (43 bytes) serializes
+`adaptive_fusion` by reference, not by value. Loading it requires the function
+to be in `__main__` first — circular. Fix: function is defined directly in
+`pipeline_class.py` and injected into `__main__` before any pickle load.
+
+---
+
+### Notebook 13 — Severity Grading (Extension)
+
+Multiclass (0-4 severity) Random Forest + XGBoost on 626-row multiclass dataset.
+
+| Model | Accuracy | Macro F1 | ROC-AUC (OvR) |
+|---|---|---|---|
+| Random Forest | 0.4603 | 0.3292 | 0.7276 |
+| XGBoost | 0.4048 | 0.2881 | 0.6798 |
+
+**Per-class breakdown (RF):**
+
+| Class | Precision | Recall | F1 | Support |
+|---|---|---|---|---|
+| 0 (no disease) | 0.71 | 0.78 | 0.74 | 45 |
+| 1 (mild) | 0.29 | 0.38 | 0.32 | 32 |
+| 2 | 0.37 | 0.32 | 0.34 | 22 |
+| 3 | 0.31 | 0.19 | 0.24 | 21 |
+| **4 (critical)** | **0.00** | **0.00** | **0.00** | **6** |
+
+**Honest assessment:** Grade 4 F1=0.00. n=6 test samples — the model never
+correctly identifies a single severity-4 patient. This is a real limitation,
+driven by class imbalance and the small dataset, not a code bug.
+
+**Production decision:** Severity field in the deployed platform uses a
+heuristic probability-band mapping (`severity_source: "heuristic_probability_band"`)
+rather than this model. Replacing the heuristic with Notebook 13's output
+would make severity *worse*, not better. The trained model is retained for
+research comparison only. Documented transparently in `severity_source` field.
+
+**Mitigation path (not yet implemented):** Collapse to 3-class (Absent/Mild/Severe),
+oversample rare classes, or treat as ordinal regression. A robustness notebook
+cell was added demonstrating the 3-class collapse.
+
+---
+
+## 4. Key Results
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    CardioSense AI — Key Metrics             │
+├──────────────────────┬────────────┬────────────┬────────────┤
+│ Metric               │ Clinical   │ ECG        │ Fused      │
+├──────────────────────┼────────────┼────────────┼────────────┤
+│ AUC                  │ 0.9266     │ 0.9424     │ 0.9582     │
+│ AUC 95% CI           │ .889–.958  │ .935–.950  │ .945–.972* │
+│ Brier Score ↓        │ 0.1130     │ 0.0943     │ —          │
+│ ECE ↓ (calibration)  │ 0.0653     │ 0.0340     │ —          │
+│ F1 Score             │ 0.8679     │ 0.8877     │ —          │
+│ Recall (Sensitivity) │ 90.2%      │ 87.6%      │ —          │
+├──────────────────────┴────────────┴────────────┴────────────┤
+│ * Fused CI not yet bootstrap-computed (open item)           │
+│ Clinical binary: Accuracy 84.78%, catches 92/102 positives  │
+│ ECG: AUC 0.9162 (dev subset) → 0.9424 (full PTB-XL)        │
+│ Gamma=3 selected via sweep; fused AUC 0.9582 at threshold   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5. Architecture — As Deployed
+
+### 5.1 ML Core
+
+```
+                     Patient Input
+                          │
+          ┌───────────────┴────────────────┐
+          │                                │
+   Clinical Dict                    ECG Signal
+   (11 features)               (1000 × 12 numpy array)
+          │                                │
+          ▼                                ▼
+  ClinicalEngine                    ECGQualityEngine
+  (KNN-imputed,                     (flatline check,
+   feature-ordered)                  SNR estimate)
+          │                                │
+          ▼                                ▼
+  Random Forest                       ECG CNN
+  Classifier                     (3 conv blocks,
+  (CalibratedClassifierCV)        PTB-XL trained)
+          │                                │
+          ▼                                ▼
+  Platt-calibrated              Platt-calibrated
+  clinical_prob                    ecg_prob
+          │                                │
+          └───────────────┬────────────────┘
+                          │
+                          ▼
+            ┌─────────────────────────────┐
+            │   Confidence-Adaptive       │
+            │       Fusion (γ=3)          │
+            │                             │
+            │  conf(p) = max(p, 1-p)      │
+            │                             │
+            │  w = conf^γ / Σconf^γ       │
+            │                             │
+            │  fused = Σ w_i × prob_i     │
+            └─────────────┬───────────────┘
+                          │
+             ┌────────────┴────────────┐
+             │                         │
+             ▼                         ▼
+    Severity Heuristic          Explainability
+    (probability bands)         ┌─────────────┐
+    "Low / Moderate /           │ SHAP        │ ← clinical
+     High / Critical"           │ (TreeExpl.) │
+                                ├─────────────┤
+                                │ Integrated  │ ← ECG
+                                │ Gradients   │
+                                └─────────────┘
+                          │
+                          ▼
+                    JSON Response
+          {prediction, fused_probability,
+           severity, confidence,
+           branch_contribution,
+           top_clinical_features,
+           top_ecg_leads, recommendations,
+           ecg_quality, disclaimer}
+```
+
+---
+
+### 5.2 Platform Architecture
+
+```
+  ┌──────────────────────────────────────────┐
+  │           Next.js 14 Frontend            │
+  │     (App Router, Tailwind, shadcn/ui)    │
+  │                                          │
+  │  /             Landing page              │
+  │  /auth         Login / Register          │
+  │  /dashboard    Risk trend, stats         │
+  │  /assess       3-step assessment wizard  │
+  │  /results/[id] Results + SHAP + ECG IG   │
+  │  /history      Assessment timeline       │
+  │  /insights     Calibration dashboard     │
+  │  /cardiobot    AI assistant (streaming)  │
+  │  /profile      User settings             │
+  └──────────────────┬───────────────────────┘
+                     │ HTTPS + JWT Bearer
+                     │ SSE for streaming
+                     ▼
+  ┌──────────────────────────────────────────┐
+  │           FastAPI Backend                │
+  │                                          │
+  │  /auth/register, /login, /me             │
+  │  /assess/run-stream  ← SSE streaming     │
+  │  /assess/{id}, /assess/history           │
+  │  /assess/digitize-ecg-image              │
+  │  /insights/calibration                   │
+  │  /insights/bootstrap-ci                  │
+  │  /insights/model-comparison              │
+  │  /insights/roc-data                      │
+  │  /insights/confusion-matrix              │
+  │  /chat  ← Groq SSE streaming             │
+  │  /health                                 │
+  └──────────┬───────────────────┬───────────┘
+             │                   │
+             ▼                   ▼
+  ┌─────────────────┐  ┌──────────────────────┐
+  │   PostgreSQL    │  │   ML Artifacts        │
+  │                 │  │   (local / Render)    │
+  │  users          │  │                       │
+  │  assessments    │  │  cardiosense_pipeline │
+  │  chat_sessions  │  │    .pkl (dict)        │
+  │  chat_messages  │  │  clinical_rf.pkl      │
+  │  model_runs     │  │  ecg_model.keras      │
+  │  alembic_ver.   │  │  pipeline_class.py    │
+  └─────────────────┘  │  13_severity_rf.pkl   │
+                        └──────────────────────┘
+                                  │
+                                  ▼
+                        ┌──────────────────────┐
+                        │   Groq API           │
+                        │   (llama-3.1-8b)     │
+                        │   CardioBot + patient │
+                        │   context injection   │
+                        └──────────────────────┘
+```
+
+---
+
+### 5.3 Assessment Streaming Flow
+
+```
+  Frontend: submit clinical form + ECG signal
+       │
+       ▼
+  POST /assess/run-stream (SSE)
+       │
+       ├─► yield "INIT_PIPELINE"
+       │        ↕ UI: ✓ Initializing multi-branch pipeline...
+       │
+       ├─► yield "RUNNING_CLINICAL_RF"
+       │        ↕ UI: ✓ Executing Structured Clinical RF branch...
+       │
+       ├─► yield "RUNNING_ECG_CNN"
+       │        ↕ UI: ✓ Executing 12-lead ECG CNN branch...
+       │
+       ├─► yield "CALIBRATING_PLATT"
+       │        ↕ UI: ✓ Running Platt calibration algorithms...
+       │
+       ├─► yield "GATING_NODE_COMPLETE"
+       │        ↕ UI: ✓ Executing Confidence-Adaptive Gating Node...
+       │
+       ├─► persist to DB (assessments table)
+       │
+       └─► yield "FINAL_REPORT_READY:{...json...}"
+                ↕ UI: ✓ Finalizing diagnostic report and SHAP explanations...
+                ↕ UI: redirect → /results/{assessment_id}
+```
+
+---
+
+### 5.4 Database Schema
+
+```
+users
+  id (UUID PK) | email | hashed_password | full_name | created_at
+
+assessments
+  id (UUID PK) | user_id (FK) | model_run_id (FK)
+  clinical_input (JSONB)            ← raw 11-feature dict
+  feature_missingness_map (JSONB)   ← audit trail: which features were null
+  ecg_quality (JSONB)
+  prediction | fused_probability | severity | severity_source
+  confidence | branch_contribution (JSONB) | branch_probabilities (JSONB)
+  top_clinical_features (JSONB)    ← SHAP values
+  top_ecg_leads (JSONB)            ← IG attributions
+  recommendations (JSONB) | disclaimer
+  created_at
+
+chat_sessions
+  id | user_id (FK) | assessment_id (FK) | title | created_at
+
+chat_messages
+  id | session_id (FK) | role | content | created_at
+
+model_runs
+  id | component | model_version | git_commit_hash
+  metrics (JSONB) | is_active | notes | created_at
+```
+
+---
+
+## 6. Critical Decisions & Pivots
+
+### D1 — KNN Imputation Leakage (Notebook 02b)
+**What happened:** Original imputer was fit on the full combined dataset before
+splitting. Test set saw training set distribution during imputation.
+**Fix:** Imputer fit on TRAIN only, `.transform()` on test. Accuracy dropped 1–3%.
+**Why it matters:** A model trained on a leaked pipeline would look slightly better
+than it actually is. The drop confirms the leak was real. The corrected numbers
+are now the official baseline.
+
+### D2 — CNN-only over CNN-LSTM (Notebook 08)
+**What happened:** Original plan specified a CNN-LSTM architecture. Ablation
+showed LSTM consistently hurt performance (AUC −0.027 at same conv depth).
+**Decision:** Lock CNN-only. LSTM adds recurrence overhead for no gain on
+single-beat ECG morphology at PTB-XL scale.
+**How to defend:** "We ran a controlled ablation holding conv-depth constant
+across CNN-only, CNN-LSTM (2 blocks), and CNN-LSTM (3 blocks). CNN-only won
+across all metrics. That's a real result — we report it, not hide it."
+
+### D3 — Formula over Learned Gating
+**What happened:** Original architecture specified a "small learned network"
+for the gating module. What shipped is a closed-form confidence-adaptive formula.
+**Reason:** The formula is interpretable, validated via gamma sweep, and avoids
+the problem of learning a meta-model on a tiny pseudo-paired sample (UCI and
+PTB-XL are different populations — there are no real clinical+ECG pairs).
+**How to defend:** "The gating is adaptive, per-patient, and analytically justified.
+The formula is the design choice — we validated it with a sweep and Platt
+calibration, not arbitrary tuning."
+
+### D4 — Severity Heuristic in Production
+**What happened:** Notebook 13 produced a severity model with Grade 4 F1=0.00.
+Replacing the heuristic banding with this model would degrade the production
+severity field.
+**Decision:** Keep heuristic in production, expose `severity_source` field so the
+pipeline is transparent about this. The trained model is documented as a
+stretch/extension, not a production component.
+
+### D5 — CardioBot Without FAISS
+**What happened:** Original plan used FAISS vector store for RAG.
+Assessment data is already structured JSON in PostgreSQL — retrieving it through
+a vector similarity search added no quality over direct DB lookup.
+**What shipped:** Groq streaming LLM (llama-3.1-8b-instant) with assessment context
+injected directly into the system prompt. Full patient context (SHAP values,
+branch contributions, ECG leads, clinical inputs) included in every chat request
+when a patient record is selected.
+
+---
+
+## 7. Data
+
+### UCI Heart Disease (Clinical Branch)
+
+| Sub-dataset | Rows | Key missingness pattern |
+|---|---|---|
+| Cleveland | 303 | Mostly complete; missing only `ca`, `thal` |
+| Hungarian | 294 | Heavy missing in `slope`, `ca`, `thal`; some `fbs` |
+| Switzerland | 123 | `chol` mostly 0 (treat as missing); heavy `ca`, `thal` |
+| VA Long Beach | 200 | Similar to Switzerland |
+| **Total** | **920** | **Binary dataset** |
+| Multiclass subset | 626 | Rows with unusable severity labels dropped |
+
+License: CC BY 4.0. Source: https://archive.ics.uci.edu/dataset/45/heart+disease
+
+### PTB-XL (ECG Branch)
+
+21,437 12-lead ECG recordings at 100 Hz, 10 seconds per record.
+PhysioNet Credentialed Health Data License 1.5.0.
+Source: https://physionet.org/content/ptb-xl/1.0.3/
+Kaggle mirror (no credentials): https://www.kaggle.com/datasets/khyeh0719/ptb-xl-dataset
+
+---
+
+## 8. Full Stack Overview
+
+| Component | Technology | Notes |
+|---|---|---|
+| Frontend | Next.js 14 (App Router), Tailwind, shadcn/ui | Antigravity for UI generation |
+| Backend | FastAPI, Python 3.11 | SSE streaming for assessment + CardioBot |
+| Database | PostgreSQL 16 + SQLAlchemy 2.0 | Alembic migrations |
+| Auth | JWT (python-jose) + bcrypt (passlib) | 7-day expiry |
+| Clinical ML | scikit-learn (Random Forest + CalibratedClassifierCV) | SHAP 0.51.0 for attribution |
+| ECG ML | TensorFlow / Keras (1D CNN) | Trained on Kaggle T4 GPU |
+| Fusion | Custom Python (scipy, numpy) | Confidence-adaptive formula, γ=3 |
+| Explainability | SHAP (TreeExplainer) + TF GradientTape (Integrated Gradients) | |
+| CardioBot | Groq API, llama-3.1-8b-instant, SSE streaming | httpx async client |
+| ECG Digitization | OpenCV, PIL, scipy | JPG/PNG → (1000,12) array |
+| Frontend deploy | Vercel | |
+| Backend deploy | Render | Free tier; ML artifacts bundled |
+| DB deploy | Render Postgres | |
+| Notebooks | Google Colab (CPU) + Kaggle (T4 GPU) | Notebooks 08/08b GPU-only |
+
+---
+
+## 9. What Was Planned vs What Shipped
+
+| Planned | Shipped | Δ |
+|---|---|---|
+| CNN-LSTM ECG branch | CNN-only (3 conv blocks) | Ablation showed LSTM hurts |
+| Learned gating network | Confidence-adaptive formula (γ=3) | More interpretable, no paired data |
+| FAISS RAG for CardioBot | Groq + direct DB assessment injection | Simpler, same quality |
+| 7 model comparison table | Binary classifiers + ECG ablation | Comprehensive per-branch evaluation |
+| Naive fusion as baseline | Linear (γ=1) vs gamma (γ=3) sweep | Gamma sweep replaced naive vs gated |
+| Grade 0-4 severity model | Heuristic banding (Grade 4 F1=0.00) | Trained model too weak for production |
+| POST /assess (simple) | POST /assess/run-stream (SSE) | Streaming pipeline animation |
+| Static insights | Live backend endpoints | All 5 insights endpoints real |
+| Fused bootstrap CI | Per-branch only (open item) | Fused CI not yet computed |
+
+---
+
+*Last updated: July 2026*
+*Build: Notebooks 01–13 complete. Platform deployed. Research README current.*

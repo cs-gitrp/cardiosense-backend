@@ -1,6 +1,10 @@
+# pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, HTTPException, status
+# pyrefly: ignore [missing-import]
 from fastapi.responses import StreamingResponse
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
+from datetime import timedelta
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
@@ -70,7 +74,7 @@ def get_assessment_history(
             prediction=r.prediction,
             fused_probability=r.fused_probability,
             severity=r.severity,
-            created_at=r.created_at.isoformat(),
+            created_at=(r.created_at + timedelta(hours=5, minutes=30)).isoformat() if r.created_at else None,
         )
         for r in rows
     ]
