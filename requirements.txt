@@ -1,5 +1,5 @@
 # CardioSense AI — Backend Production Requirements
-# Python 3.11.9 (set in Render dashboard AND runtime.txt)
+# Python 3.11.11 (set in Render dashboard AND runtime.txt)
 #
 # Intentionally excluded:
 #   torch         — ECG model is .keras (TensorFlow), not PyTorch
@@ -10,7 +10,7 @@
 
 # ── Web framework ─────────────────────────────────────────────
 fastapi==0.115.0
-uvicorn[standard]==0.30.6
+granian==2.5.0
 python-multipart==0.0.9
 starlette==0.38.6
 
@@ -37,7 +37,7 @@ httpx==0.28.1
 scikit-learn==1.6.1
 xgboost==2.1.1
 joblib==1.4.2
-shap==0.51.0
+shap==0.46.0
 
 # ── ML — ECG branch ───────────────────────────────────────────
 tensorflow==2.18.0
