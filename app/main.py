@@ -52,7 +52,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://cardiosense.vercel.app"],
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -92,3 +92,19 @@ app.include_router(me_router)
 @app.get("/health")
 def health():
     return {"status": "ok", "environment": settings.ENVIRONMENT}
+
+
+@app.get("/")
+def root():
+    return {
+        "service": "CardioSense Backend",
+        "status": "healthy",
+        "version": "1.0.0"
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok"
+    }

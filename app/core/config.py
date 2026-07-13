@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 from pydantic_settings import BaseSettings
 
 
@@ -11,7 +12,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str | None = None
     BACKEND_CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
-        "https://cardiosense.vercel.app",
+        "https://cardiosense-gamma.vercel.app",
     ]
 
     class Config:
