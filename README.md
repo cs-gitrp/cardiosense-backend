@@ -4,8 +4,8 @@
 
 **Production FastAPI backend and research ML pipeline for multimodal cardiac risk assessment**
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-cardiosense.vercel.app-0ea5e9?style=flat-square&logo=vercel)](https://cardiosense.vercel.app)
-[![API Docs](https://img.shields.io/badge/API%20Docs-Swagger%20UI-009688?style=flat-square&logo=fastapi)](https://cardiosense-backend.onrender.com/docs)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-cardiosense.vercel.app-0ea5e9?style=flat-square&logo=vercel)](https://cardiosense-gamma.vercel.app/)
+[![API Docs](https://img.shields.io/badge/API%20Docs-Swagger%20UI-009688?style=flat-square&logo=fastapi)](https://cardiosense-backend-7j16.onrender.com/docs)
 [![Frontend](https://img.shields.io/badge/Frontend%20Repo-cardiosense--frontend-6366f1?style=flat-square&logo=github)](https://github.com/cs-gitrp/cardiosense-frontend)
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
@@ -28,15 +28,29 @@ Three design decisions distinguish it from a standard ML pipeline:
 
 ---
 
-## Model performance
+## Model Performance
 
-| Branch | AUC | Brier | ECE | 95% CI (bootstrap, n=1000) |
-|---|---|---|---|---|
-| ECG (1D-CNN) | **0.9424** | 0.0943 | **0.034** | 0.9347 – 0.9504 |
-| Clinical (RF) | **0.9266** | 0.1130 | 0.0653 | 0.8887 – 0.9582 |
-| **Fused** | **0.9582** | — | — | **0.9445 – 0.9719** |
+Performance metrics are reported on independently held-out test sets.
+Bootstrap confidence intervals were computed using **1000 bootstrap resamples**.
 
-Clinical branch recall: **90.2%** — tuned deliberately to minimise false negatives. In cardiac risk screening, missing a true positive is the worse error.
+| Branch | AUC | 95% CI | Brier Score | ECE |
+|--------|------:|:---------------:|------:|------:|
+| ECG (CNN) | **0.9424** | 0.9347 – 0.9504 | 0.0943 | 0.034 |
+| Clinical (RF) | **0.9266** | 0.8887 – 0.9582 | 0.1130 | *See calibration analysis* |
+
+> **Fusion module:** CardioSense uses a **confidence-adaptive decision-level fusion** mechanism built on calibrated branch probabilities. Because the clinical (UCI Heart Disease) and ECG (PTB-XL) datasets originate from different patient cohorts and are **not patient-paired**, the fusion component is validated as an **architectural decision module** rather than through a combined held-out accuracy metric. Therefore, **no aggregate Fusion AUC is reported**.
+
+Clinical branch recall: **90.2%** — intentionally optimized to minimize false negatives, which are more critical in cardiac risk screening than false positives.
+
+**Key design decisions contributing to these results:**
+
+- Patient-grouped **GroupShuffleSplit** on `patient_id` eliminated patient leakage in PTB-XL by ensuring that no patient's ECGs appeared across multiple splits.
+- Confidence calibration using **Platt Scaling** before fusion improved probability reliability, reducing ECG Expected Calibration Error (ECE) to **0.034**.
+- Clinical missing values were modeled as explicit information through engineered missingness indicators instead of being discarded or blindly imputed.
+- Three ECG architectures were evaluated during ablation. A **3-block CNN** consistently outperformed both CNN-LSTM variants and was selected as the final ECG architecture.
+- Confidence-adaptive fusion dynamically adjusts branch influence according to calibrated prediction confidence, replacing conventional fixed-weight multimodal fusion.
+- Model explanations combine **SHAP** (clinical branch) and **Integrated Gradients** (ECG branch) to provide modality-specific interpretability.
+- Performance uncertainty is quantified using **1000-bootstrap confidence intervals** for robust evaluation rather than relying solely on point estimates.
 
 ---
 
@@ -194,33 +208,38 @@ cardiosense-backend/
 
 ---
 
-## ML research pipeline — Notebooks 01–13
+## ML Research Pipeline (14 Development Notebooks)
 
-The `research/notebooks/` directory is the full reproducible ML development record. Notebooks must be run in order; each checkpoint is consumed by the next.
+The `research/notebooks/` directory contains the complete reproducible ML development pipeline behind CardioSense AI. Each notebook represents a major milestone in the research workflow and should be executed sequentially.
 
-| Notebook | Purpose | Key output |
+| Notebook | Purpose | Key Output |
 |---|---|---|
-| `01_eda_clinical.ipynb` | UCI Heart Disease EDA, class balance, outlier audit | Feature distribution plots |
-| `02_eda_ecg.ipynb` | PTB-XL signal EDA, lead inspection, label distribution | Lead correlation matrix |
-| `03_feature_selection.ipynb` | ANOVA-F + RFE + mutual information consensus selection | `04_selected_features.csv` |
-| `04_clinical_baseline.ipynb` | Logistic regression, Decision Tree, SVM baselines | Baseline AUC table |
-| `05_random_forest.ipynb` | RF hyperparameter search (GridSearchCV), final fit | `clinical_rf.pkl` |
-| `06_calibration_clinical.ipynb` | Platt scaling sweep (gamma 1–5), ECE evaluation | Calibration curve plots |
-| `07_shap_clinical.ipynb` | SHAP TreeExplainer — global + per-sample attributions | SHAP summary plots |
-| `08_ecg_preprocessing.ipynb` | PTB-XL signal normalisation, GroupShuffleSplit on patient_id | Train/val/test splits |
-| `09_ecg_cnn.ipynb` | 1D-CNN architecture search, CNN vs CNN-LSTM ablation | `ecg_model.keras` |
-| `10_calibration_ecg.ipynb` | Platt scaling for ECG branch, bootstrap CI (n=1000) | ECG calibration plots |
-| `11_integrated_gradients.ipynb` | IG attribution on CNN — lead + waveform region importance | IG heatmap examples |
-| `12_fusion.ipynb` | Confidence-adaptive fusion, gamma sweep, final AUC 0.9582 | `cardiosense_pipeline.pkl` |
-| `13_severity.ipynb` | Multiclass severity RF (Grade 0–4); Grade 4 F1=0.00 — **not in prod** | Severity model (secondary) |
+| `01_data_exploration.ipynb` | Exploratory analysis of the UCI Heart Disease dataset, feature distributions, missing values and class balance | Dataset statistics & EDA visualizations |
+| `02_proper_preprocessing.ipynb` | Clinical preprocessing, missing-value handling, feature engineering and leakage-safe dataset preparation | Cleaned training dataset |
+| `03_baseline_models_v1.ipynb` | Baseline machine learning experiments (Logistic Regression, SVM, Decision Tree, Random Forest, XGBoost) | Baseline performance comparison |
+| `04_feature_selection.ipynb` | Feature selection using Chi-Square, LASSO and Random Forest importance | Ranked feature importance |
+| `05_feature_selection_validation.ipynb` | Validation of reduced-feature models against full-feature models | Final clinical feature subset |
+| `06_ptbxl_metadata_preparation.ipynb` | PTB-XL metadata parsing, diagnostic superclass mapping and dataset preparation | Processed PTB-XL metadata |
+| `07_ecg_signal_processing.ipynb` | ECG waveform loading, normalization, patient-wise splitting and preprocessing | Model-ready ECG tensors |
+| `08_cnn_lstm_ecg_classifier.ipynb` | CNN and CNN-LSTM architecture experiments for ECG classification | Architecture comparison results |
+| `08b_final_ecg_training.ipynb` | Final production 3-block CNN training, evaluation and model export | Production ECG model |
+| `09_confidence-adaptive-fusion.ipynb` | Platt calibration, confidence-adaptive fusion and probability calibration | Fusion inference pipeline |
+| `10_explainable-ai.ipynb` | SHAP explanations for the clinical branch and Integrated Gradients for ECG interpretation | Explainability artifacts |
+| `11_comprehensive-evaluation.ipynb` | ROC analysis, confusion matrix, calibration curves and bootstrap confidence intervals | Final evaluation metrics |
+| `12_cardiosense-inference-pipeline.ipynb` | End-to-end production inference pipeline and artifact packaging | Production inference pipeline |
+| `13_multiclass-severity-model.ipynb` | Experimental multiclass severity prediction (Low–Critical); secondary research module not used in production inference | Severity prediction model |
 
-**Critical design decisions recorded in notebooks:**
+**Key research decisions documented throughout the notebook pipeline:**
 
-- `08`: `GroupShuffleSplit` on `patient_id` is mandatory. PTB-XL has multiple recordings per patient — random split leaks patient signal into the test set and inflates AUC by ~3–4 points.
-- `09`: CNN-LSTM evaluated in ablation. LSTM added ~12ms latency and reduced AUC by 0.008. Dropped.
-- `10`: Missingness in clinical features is encoded as an explicit binary indicator, not imputed away. The RF learns that missingness itself is predictive.
-- `12`: Gamma=3 selected after sweep over {1, 2, 3, 4, 5}. Higher gamma over-sharpens and collapses to single-branch behaviour.
-- `13`: Severity multiclass retained in repo for extension work; Grade 4 F1=0.00 due to extreme class imbalance. Not used in production inference.
+- `02` — Clinical preprocessing removes data leakage, engineers missing-value indicators and prepares production-ready feature pipelines.
+- `05` — Feature-selection validation confirms that the reduced clinical feature set preserves predictive performance while simplifying inference.
+- `07` — Patient-wise splitting (`GroupShuffleSplit`) prevents ECG data leakage across train, validation and test sets.
+- `08 / 08b` — Multiple ECG architectures were evaluated. The final deployed model is the optimized 3-block CNN selected after CNN-LSTM ablation experiments.
+- `09` — Confidence-adaptive multimodal fusion combines calibrated branch probabilities using Platt scaling with an experimentally selected gamma value.
+- `10` — Explainability integrates SHAP for structured clinical features and Integrated Gradients for ECG waveform attribution.
+- `11` — Comprehensive evaluation reports ROC curves, calibration diagnostics, confusion matrices and bootstrap confidence intervals.
+- `12` — The complete production inference contract freezes preprocessing, model loading, fusion logic and output schema used by the deployed API.
+- `13` — Multiclass severity prediction is retained as an experimental extension for future work and is intentionally excluded from the production inference pipeline.
 
 ---
 
@@ -244,7 +263,7 @@ The `research/notebooks/` directory is the full reproducible ML development reco
 | POST | `/chat` | Bearer | CardioBot — SSE streaming, Groq context injection |
 | GET | `/health` | — | Health check |
 
-Full interactive docs: `https://cardiosense-backend.onrender.com/docs`
+Full interactive docs: `https://cardiosense-backend-7j16.onrender.com/docs`
 
 ---
 
@@ -279,7 +298,7 @@ alembic upgrade head
 ```
 
 **ML artifacts** — binary files are not in the repository. Either:
-- Reproduce from Notebook 12 (`research/notebooks/12_fusion.ipynb`)
+- Reproduce from Notebook 12 (`research/notebooks/12_cardiosense-inference-pipeline.ipynb`)
 - Contact for access to the serialized artifacts
 
 Start the server:
@@ -314,7 +333,7 @@ Environment variables set in Render dashboard. `MODEL_DIR` points to the seriali
 
 ## Author
 
-**Chandan Singh** · B.Tech CSE (AI/ML), KCC Institute of Technology & Management
+**Chandan Singh** · B.Tech CSE (AI/ML)
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-chandan--singh-0077b5?style=flat-square&logo=linkedin)](https://linkedin.com/in/chandan-singh-a23563304)
 [![GitHub](https://img.shields.io/badge/GitHub-cs--gitrp-181717?style=flat-square&logo=github)](https://github.com/cs-gitrp)
